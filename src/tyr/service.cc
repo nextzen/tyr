@@ -718,7 +718,8 @@ namespace {
   class tyr_worker_t {
    public:
     tyr_worker_t(const boost::property_tree::ptree& config):config(config),
-      long_request(config.get<float>("tyr.logging.long_request")){
+      long_request(config.get<float>("tyr.logging.long_request")),
+      loki_long_request(config.get<float>("loki.logging.long_request")) {
     }
     worker_t::result_t work(const std::list<zmq::message_t>& job, void* request_info) {
       auto& info = *static_cast<http_request_t::info_t*>(request_info);
@@ -776,16 +777,20 @@ namespace {
         if(jsonp)
           json_stream << ')';
 
-        //get processing time for locate
+        //get processing time for route
         auto time = std::chrono::high_resolution_clock::now();
         auto msecs = std::chrono::duration_cast<std::chrono::milliseconds>(time.time_since_epoch()).count();
-        auto elapsed_time = static_cast<float>(msecs - request.get<size_t>("start_time"));
 
         //log request if greater then X (ms)
-        auto trip_directions_length = 0;
+        auto trip_directions_length = 0.f;
+        auto search_time = 0.f;
         for(const auto& leg : legs) {
           trip_directions_length += leg.summary().length();
+          //calculate the search portion of the request
+          search_time = leg.location_size() - loki_long_request;
         }
+        //need to subtract off the time it takes to search, especially for small routes
+        auto elapsed_time = static_cast<float>(msecs - request.get<size_t>("start_time") - search_time);
         if ((elapsed_time / trip_directions_length) > long_request) {
           std::stringstream ss;
           boost::property_tree::json_parser::write_json(ss, request, false);
@@ -813,6 +818,7 @@ namespace {
    protected:
     boost::property_tree::ptree config;
     float long_request;
+    float loki_long_request;
   };
 }
 
